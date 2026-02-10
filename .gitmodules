@@ -1,0 +1,3 @@
+[submodule "artifacts/ODGen"]
+	path = artifacts/ODGen
+	url = https://github.com/Song-Li/ODGen
