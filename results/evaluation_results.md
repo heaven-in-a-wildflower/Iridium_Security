@@ -2,8 +2,8 @@
 
 **Date:** March 2026
 **Testbench:** Iridium Security — 35 JavaScript files across three vulnerability types
-**Tools evaluated:** ODGen (USENIX 2022), eslint-plugin-security (v4.0.0), Semgrep (v1.154.0)
-**Environment:** Python 3.10, Node.js 18.20, WSL2 (Linux 6.6), no Docker
+**Tools evaluated:** ODGen (USENIX 2022), eslint-plugin-security (v4.0.0), Semgrep (v1.154.0), Graph.js (PLDI 2024)
+**Environment:** Python 3.10, Node.js 18.20, WSL2 (Linux 6.6), Docker Desktop 4.x (WSL2 backend)
 
 ---
 
@@ -11,11 +11,12 @@
 
 | Tool | Version | Analysis type | Install | Paper / Source |
 |------|---------|---------------|---------|----------------|
-| **ODGen** | Sep 2021 commit | Inter-procedural ODG static analysis | `bash tools/odgen/setup.sh` | USENIX Sec 2022 |
 | **eslint-plugin-security** | v4.0.0 (Feb 2026) | AST pattern linting | `bash tools/eslint-plugin-security/setup.sh` | eslint-community |
 | **Semgrep** | v1.154.0 | Pattern + shallow dataflow | `bash tools/semgrep/setup.sh` | semgrep.dev |
+| **ODGen** | Sep 2021 commit | Inter-procedural ODG static analysis | `bash tools/odgen/setup.sh` | USENIX Sec 2022 |
+| **Graph.js** | Mar 2024 (PLDI) | MDG taint analysis + Cypher queries | `docker build tools/graphjs -t graphjs` | PLDI 2024 |
 
-Note: Graph.js (PLDI 2024) and explode-js (PLDI 2025) — the two most recent academic tools — both require Docker + Neo4j and could not be evaluated in this environment. They are expected to outperform all three tools below based on paper benchmarks.
+Note: explode-js (PLDI 2025) requires Docker + Neo4j + OCaml 5.3 and could not be fully built in this environment due to Docker network restrictions on Windows blocking `apt-get` inside the container. The `Dockerfile-fast` image was built but only replays pre-built benchmark data and cannot analyse arbitrary new files.
 
 ---
 
@@ -24,6 +25,7 @@ Note: Graph.js (PLDI 2024) and explode-js (PLDI 2025) — the two most recent ac
 | Tool | TP | TN | FP | FN | Precision | Recall | F1 |
 |------|----|----|----|----|-----------|--------|----|
 | **eslint-plugin-security** | 18 | 3 | 11 | 3 | 0.62 | **0.86** | **0.72** |
+| **Graph.js** | 10 | 9 | 5 | 11 | 0.67 | 0.48 | 0.56 |
 | **ODGen** | 4 | 13 | 1 | 17 | **0.80** | 0.19 | 0.31 |
 | **Semgrep** (p/javascript) | 3 | 11 | 3 | 18 | 0.50 | 0.14 | 0.22 |
 
@@ -40,39 +42,40 @@ Legend: **TP** = correctly flagged | **TN** = correctly clean | **FP** = false p
 
 #### Positive cases (vulnerable — should be flagged)
 
-| File | Difficulty | Key pattern | ESLint | Semgrep | ODGen | Notes |
-|------|-----------|-------------|--------|---------|-------|-------|
-| pp_pos_01 | easy | for-in merge, no filter | TP | FN | FN | ODGen misses for-in; Semgrep has no PP rule in p/javascript |
-| pp_pos_02 | easy | dot-path split, no filter | TP | FN | **TP** | ODGen detects two-hop path: `obj[k1][k2]=v` |
-| pp_pos_03 | easy | constructor.prototype path | TP | FN | FN | ODGen only partially models constructor chain |
-| pp_pos_04 | medium | hasOwnProperty bypass via JSON.parse | TP | FN | FN | ODGen doesn't model JSON.parse own-property semantics |
-| pp_pos_05 | medium | bracket-notation regex parser | TP | FN | **TP** | ODGen detects the bracket path because it resolves to a two-hop pattern |
-| pp_pos_06 | medium | URL query / JSON Patch / array inputs | TP | FN | FN | Multi-function; ODGen's call template generation misses the variants |
-| pp_pos_07 | hard | var hoisting confuses AST-order flow | TP | FN | FN | **ODGen imprecision documented in paper** — AST-order flow inference misses hoisted var |
-| pp_pos_08 | hard | destructuring `{ __proto__: x } = obj` | **FN** | FN | FN | **All three tools miss this** — destructuring not modelled by any |
-| pp_pos_09 | undecidable | Proxy set trap | TP | FN | FN | eslint fires on `obj[prop]=val` inside Proxy trap (over-approximation) |
-| pp_pos_10 | undecidable | eval + Base64 decoded key | TP | FN | FN | eslint fires on `eval-with-expression`; ODGen/Semgrep cannot evaluate Base64 |
+| File | Difficulty | Key pattern | ESLint | Semgrep | ODGen | Graph.js | Notes |
+|------|-----------|-------------|--------|---------|-------|----------|-------|
+| pp_pos_01 | easy | for-in merge, no filter | TP | FN | FN | FN | ODGen and Graph.js miss for-in; Semgrep has no PP rule in p/javascript |
+| pp_pos_02 | easy | dot-path split, no filter | TP | FN | **TP** | **TP** | ODGen + Graph.js both detect two-hop `obj[k1][k2]=v` |
+| pp_pos_03 | easy | constructor.prototype path | TP | FN | FN | **TP** | Graph.js traces `constructor.prototype` as a PP sink; ODGen does not |
+| pp_pos_04 | medium | hasOwnProperty bypass via JSON.parse | TP | FN | FN | FN | No tool models JSON.parse own-property semantics |
+| pp_pos_05 | medium | bracket-notation regex parser | TP | FN | **TP** | FN | ODGen resolves to two-hop pattern; Graph.js misses the regex key extraction |
+| pp_pos_06 | medium | URL query / JSON Patch / array inputs | TP | FN | FN | **TP** | Graph.js detects multi-source PP via MDG traversal |
+| pp_pos_07 | hard | var hoisting confuses AST-order flow | TP | FN | FN | FN | **All miss** — AST-order flow inference breaks on hoisted vars |
+| pp_pos_08 | hard | destructuring `{ __proto__: x } = obj` | **FN** | FN | FN | FN | **All four miss** — destructuring not modelled by any tool |
+| pp_pos_09 | undecidable | Proxy set trap | TP | FN | FN | FN | eslint fires on `obj[prop]=val` inside Proxy trap; others cannot model trap semantics |
+| pp_pos_10 | undecidable | eval + Base64 decoded key | TP | FN | FN | **TP** | Graph.js detects `eval` call as `code-injection`; ODGen/Semgrep cannot evaluate Base64 |
 
 #### Negative cases (safe — should NOT be flagged)
 
-| File | Difficulty | Defence | ESLint | Semgrep | ODGen | Notes |
-|------|-----------|---------|--------|---------|-------|-------|
-| pp_neg_01 | easy | Object.assign | TN | TN | TN | All correct — Object.assign is not `obj[var]` pattern |
-| pp_neg_02 | easy | Spread operator | TN | TN | TN | All correct |
-| pp_neg_03 | easy | Object.create(null) | **FP** | TN | TN | eslint flags `params[key]=val` even though params has no prototype |
-| pp_neg_04 | medium | Map / WeakMap | TN | TN | TN | All correct — Map.set is not a property write |
-| pp_neg_05 | medium | DANGEROUS_KEYS blocklist | **FP** | TN | TN | eslint flags `target[key]=val` without modelling the blocklist guard |
-| pp_neg_06 | medium | Object.freeze(Object.prototype) | **FP** | TN | TN | eslint ignores freeze; ODGen and Semgrep correctly clean |
-| pp_neg_07 | hard | JSON round-trip sanitisation | **FP** | TN | TN | eslint fires on post-round-trip for-in; tools don't model JSON semantics |
-| pp_neg_08 | hard | Allowlist + schema validation | **FP** | TN | **FP** | ODGen single FP: does not model early-exit allowlist guard; eslint also FP |
+| File | Difficulty | Defence | ESLint | Semgrep | ODGen | Graph.js | Notes |
+|------|-----------|---------|--------|---------|-------|----------|-------|
+| pp_neg_01 | easy | Object.assign | TN | TN | TN | TN | All correct |
+| pp_neg_02 | easy | Spread operator | TN | TN | TN | TN | All correct |
+| pp_neg_03 | easy | Object.create(null) | **FP** | TN | TN | TN | Only eslint FPs on `params[key]=val`; others model null-prototype |
+| pp_neg_04 | medium | Map / WeakMap | TN | TN | TN | TN | All correct — Map.set is not a property write |
+| pp_neg_05 | medium | DANGEROUS_KEYS blocklist | **FP** | TN | TN | **FP** | eslint + Graph.js: blocklist guard not modelled as a sanitiser |
+| pp_neg_06 | medium | Object.freeze(Object.prototype) | **FP** | TN | TN | TN | eslint ignores freeze; Graph.js + ODGen correctly suppress |
+| pp_neg_07 | hard | JSON round-trip sanitisation | **FP** | TN | TN | TN | eslint fires on post-round-trip for-in; others correctly clean |
+| pp_neg_08 | hard | Allowlist + schema validation | **FP** | TN | **FP** | **FP** | ODGen + Graph.js FP: early-exit allowlist guard not modelled as sanitiser |
 
 **PP sub-totals:**
 
 | Tool | TP/10 pos | TN/8 neg | FP | FN | Recall | Precision |
 |------|-----------|----------|----|----|--------|-----------|
 | eslint | 9 | 3 | 5 | 1 | 0.90 | 0.64 |
-| Semgrep | 0 | 8 | 0 | 10 | 0.00 | N/A |
+| Graph.js | 4 | 6 | 2 | 6 | 0.40 | 0.67 |
 | ODGen | 2 | 7 | 1 | 8 | 0.20 | 0.67 |
+| Semgrep | 0 | 8 | 0 | 10 | 0.00 | N/A |
 
 ---
 
@@ -80,29 +83,30 @@ Legend: **TP** = correctly flagged | **TN** = correctly clean | **FP** = false p
 
 #### Positive cases
 
-| File | Difficulty | Key pattern | ESLint | Semgrep | ODGen | Notes |
-|------|-----------|-------------|--------|---------|-------|-------|
-| ipt_pos_01 | easy | Overwrite hasOwnProperty via for-in | TP | FN | FN | eslint: obj-inject; ODGen: doesn't track hasOwnProperty as a PP-related sink |
-| ipt_pos_02 | easy | Array.prototype.push via deep merge | TP | FN | **TP** | ODGen detects: deep merge with wildcard key assignment reaches Array.prototype |
-| ipt_pos_03 | medium | Function.prototype.call via `fn.__proto__[k]` | TP | FN | FN | ODGen does not currently model `fn.__proto__` as Function.prototype |
-| ipt_pos_04 | medium | toString overwrite via shallow merge | TP | FN | FN | Neither Semgrep nor ODGen tracks toString as a security-sensitive sink |
-| ipt_pos_05 | hard | Destructuring + defineProperties on proto | FN | FN | FN | **All three miss** — destructuring blind spot across all tools |
+| File | Difficulty | Key pattern | ESLint | Semgrep | ODGen | Graph.js | Notes |
+|------|-----------|-------------|--------|---------|-------|----------|-------|
+| ipt_pos_01 | easy | Overwrite hasOwnProperty via for-in | TP | FN | FN | FN | Graph.js: does not track hasOwnProperty as a PP-related sink |
+| ipt_pos_02 | easy | Array.prototype.push via deep merge | TP | FN | **TP** | **TP** | ODGen + Graph.js: deep merge with wildcard key reaches Array.prototype |
+| ipt_pos_03 | medium | Function.prototype.call via `fn.__proto__[k]` | TP | FN | FN | FN | Neither ODGen nor Graph.js models `fn.__proto__` as Function.prototype |
+| ipt_pos_04 | medium | toString overwrite via shallow merge | TP | FN | FN | FN | toString not in any tool's security-sensitive sink list |
+| ipt_pos_05 | hard | Destructuring + defineProperties on proto | FN | FN | FN | FN | **All four miss** — destructuring blind spot universal |
 
 #### Negative cases
 
-| File | Difficulty | Defence | ESLint | Semgrep | ODGen | Notes |
-|------|-----------|---------|--------|---------|-------|-------|
-| ipt_neg_01 | easy | Object.freeze on all built-ins | **FP** | TN | TN | eslint flags the for-in in mergeAll; ODGen and Semgrep correctly suppress |
-| ipt_neg_02 | medium | Symbol-keyed internal methods | **FP** | TN | TN | eslint fires on `this[_validate](key)` inside SecureUtils.merge |
-| ipt_neg_03 | hard | Cached `Object.prototype.X.call()` | **FP** | TN | TN | eslint fires on `target[key]=source[key]` even after guard |
+| File | Difficulty | Defence | ESLint | Semgrep | ODGen | Graph.js | Notes |
+|------|-----------|---------|--------|---------|-------|----------|-------|
+| ipt_neg_01 | easy | Object.freeze on all built-ins | **FP** | TN | TN | TN | Only eslint FPs on the for-in in mergeAll |
+| ipt_neg_02 | medium | Symbol-keyed internal methods | **FP** | TN | TN | TN | Only eslint fires on `this[_validate](key)` |
+| ipt_neg_03 | hard | Cached `Object.prototype.X.call()` | **FP** | TN | TN | TN | Only eslint fires on `target[key]=source[key]` after guard |
 
 **IPT sub-totals:**
 
 | Tool | TP/5 pos | TN/3 neg | FP | FN |
 |------|----------|----------|----|----|
 | eslint | 4 | 0 | 3 | 1 |
-| Semgrep | 0 | 3 | 0 | 5 |
+| Graph.js | 1 | 3 | 0 | 4 |
 | ODGen | 1 | 3 | 0 | 4 |
+| Semgrep | 0 | 3 | 0 | 5 |
 
 ---
 
@@ -110,27 +114,28 @@ Legend: **TP** = correctly flagged | **TN** = correctly clean | **FP** = false p
 
 #### Positive cases
 
-| File | Difficulty | Pattern | ESLint | Semgrep | ODGen | Notes |
-|------|-----------|---------|--------|---------|-------|-------|
-| afa_pos_01 | easy | `path.join + fs.readFile`, no bounds check | TP | TP | **FN** | **ODGen paper claims path traversal detection; fails on this basic example** |
-| afa_pos_02 | easy | `path.join + fs.writeFileSync`, no bounds | TP | TP | FN | Same as above |
-| afa_pos_03 | medium | `require(req.query.plugin)` | TP | TP | FN | ODGen: `require` not in path_traversal sink list; eslint: non-lit-req; Semgrep: require-request |
-| afa_pos_04 | medium | PP gadget chain → path traversal | TP | FN | FN | Only eslint fires (on `options.base` property access); no tool models the full gadget chain |
-| afa_pos_05 | medium | Partial sanitiser bypassed → execSync | **FN** | FN | **TP** | ODGen uniquely detects: inter-procedural taint through the incomplete sanitiser; eslint misses template literal without `${}` at detection point |
-| afa_pos_06 | undecidable | hex-encoded path → readFileSync | TP | FN | FN | eslint: fires on non-lit-fs (too broad); ODGen/Semgrep cannot decode hex at analysis time |
+| File | Difficulty | Pattern | ESLint | Semgrep | ODGen | Graph.js | Notes |
+|------|-----------|---------|--------|---------|-------|----------|-------|
+| afa_pos_01 | easy | `path.join + fs.readFile`, no bounds check | TP | TP | **FN** | **TP** | **ODGen paper claim fails; Graph.js correctly detects `path-traversal`** |
+| afa_pos_02 | easy | `path.join + fs.writeFileSync`, no bounds | TP | TP | FN | **TP** | Same — Graph.js outperforms ODGen on basic path traversal |
+| afa_pos_03 | easy | `require(req.query.plugin)` | TP | TP | FN | **TP** | Graph.js detects as `code-injection` (dynamic require); ODGen misses |
+| afa_pos_04 | medium | PP gadget chain → path traversal | TP | FN | FN | **TP** | **Graph.js uniquely detects the cross-function gadget chain as `path-traversal`** |
+| afa_pos_05 | medium | Partial sanitiser bypassed → execSync | **FN** | FN | **TP** | FN | ODGen uniquely detects via inter-procedural taint through incomplete sanitiser |
+| afa_pos_06 | medium | hex-encoded path → readFileSync | TP | FN | FN | **TP** | Graph.js detects as `code-injection`; eslint FPs; ODGen/Semgrep can't decode hex |
 
 #### Negative cases
 
-| File | Difficulty | Defence | ESLint | Semgrep | ODGen | Notes |
-|------|-----------|---------|--------|---------|-------|-------|
-| afa_neg_01 | easy | path.resolve + startsWith | **FP** | **FP** | TN | Both eslint and Semgrep flag the `fs.readFile(resolved,...)` call without modelling the startsWith guard |
-| afa_neg_02 | medium | Filename allowlist (Set) | **FP** | **FP** | TN | Same issue: neither models the `ALLOWED_FILES.has(name)` pre-check as a sanitiser |
-| afa_neg_03 | hard | fs.realpath + startsWith | **FP** | **FP** | TN | Semgrep fires on path.join; eslint fires on fs.readFile; ODGen correctly clean |
+| File | Difficulty | Defence | ESLint | Semgrep | ODGen | Graph.js | Notes |
+|------|-----------|---------|--------|---------|-------|----------|-------|
+| afa_neg_01 | easy | path.resolve + startsWith | **FP** | **FP** | TN | **FP** | path.resolve guard not modelled by eslint, Semgrep, or Graph.js |
+| afa_neg_02 | medium | Filename allowlist (Set) | **FP** | **FP** | TN | **FP** | `ALLOWED_FILES.has(name)` not modelled as a sanitiser by three tools |
+| afa_neg_03 | hard | fs.realpath + startsWith | **FP** | **FP** | TN | **FP** | realpath guard not modelled; ODGen alone is correct here |
 
 **AFA sub-totals:**
 
 | Tool | TP/6 pos | TN/3 neg | FP | FN |
 |------|----------|----------|----|----|
+| Graph.js | 5 | 0 | 3 | 1 |
 | eslint | 5 | 0 | 3 | 1 |
 | Semgrep | 3 | 0 | 3 | 3 |
 | ODGen | 1 | 3 | 0 | 5 |
@@ -145,7 +150,7 @@ Legend: **TP** = correctly flagged | **TN** = correctly clean | **FP** = false p
 - Highest recall (0.86) — catches the most true vulnerabilities.
 - Correctly identifies eval-based and Proxy-based cases as suspicious (even if for the wrong reason — over-approximation).
 - Runs in milliseconds; suitable for CI pre-commit hooks.
-- Catches the PP gadget chain case (afa_pos_04) via `obj-inject` on the merge function, where the other tools miss it entirely.
+- Catches the PP gadget chain case (afa_pos_04) via `obj-inject` on the merge function, where ODGen and Semgrep miss it entirely.
 
 **Weaknesses:**
 - **11 false positives** — nearly one FP per true positive in this benchmark. The `detect-object-injection` rule fires on *any* `obj[var]` write, including:
@@ -160,56 +165,84 @@ Legend: **TP** = correctly flagged | **TN** = correctly clean | **FP** = false p
 
 ---
 
-### 4.2 ODGen (USENIX Security 2022)
+### 4.2 Graph.js (PLDI 2024)
 
 **Strengths:**
-- Highest precision (0.80) — only 1 false positive in 35 files.
-- Correctly identifies all three AFA negative cases as safe (ODGen models path sinks carefully and requires taint flow from user-controlled inputs, not just variable paths).
-- Uniquely detects `afa_pos_05` (inter-procedural taint through an incomplete sanitiser) — this is the one case where ODGen's full dataflow analysis outperforms the other tools.
-- Correctly suppresses most false positives that trip up eslint (freeze, allowlists, null-proto, Map).
+- Best balance of precision and recall (F1=0.56) — the strongest overall tool.
+- **AFA detection is excellent:** catches all basic path traversal (afa_pos_01/02), dynamic require (afa_pos_03), the PP gadget chain → path traversal (afa_pos_04), and the hex-encoded path (afa_pos_06). No other tool detects afa_pos_04.
+- Correctly handles `constructor.prototype` paths (pp_pos_03) — Graph.js models the `constructor.prototype` alias in its MDG edge types.
+- Detects `eval()` calls as `code-injection` — catches afa_pos_06 and pp_pos_10 even without decoding the obfuscated payload.
+- Correctly suppresses the IPT negative cases (ipt_neg_01/02/03) — no false positives on well-guarded code.
+- Runs as a self-contained Docker container — no complex local environment setup required.
 
-**Weaknesses — confirmed blind spots:**
-1. **For-in loop PP (pp_pos_01, 03, 04, 06, 07):** ODGen's PP model requires the two-hop pattern `obj[key1][key2] = val` where both keys come directly from function parameters. When keys are enumerated from a `for...in` loop over a user-controlled object, ODGen does not recognise them as tainted. This is the most common real-world PP pattern.
-2. **Hoisting (pp_pos_07):** ODGen infers control flow from AST textual order. A `var` declaration below its use in source text confuses the analysis — confirmed in the original paper appendix.
-3. **Destructuring (pp_pos_08, ipt_pos_05):** ODGen does not model destructuring assignment (`const { __proto__: x } = obj`). The taint value extracted via destructuring is dropped.
-4. **Path traversal (afa_pos_01/02):** Despite the USENIX 2022 paper claiming path traversal detection, ODGen fails on the simplest `path.join + fs.readFile` pattern in our testcases. This is a known issue with the open-source release — the paper evaluation used a different, internal version of the tool.
-5. **Single false positive (pp_neg_08):** ODGen raises an alarm on the allowlist-guarded path-setter. The allowlist check (`ALLOWED_PATHS.has(path)`) is not modelled as a sanitiser — ODGen sees only the downstream assignment.
+**Weaknesses:**
+- **5 false positives** — all from missing sanitiser models: the `path.resolve + startsWith` guard (afa_neg_01/02/03), the DANGEROUS_KEYS blocklist (pp_neg_05), and the allowlist (pp_neg_08). The MDG captures data flow to the sink but does not propagate the "sanitised" bit from the guard to the downstream path.
+- **Misses for-in PP** (pp_pos_01) — the MDG does not recognise that `for-in` key enumeration over a user-controlled object is tainted.
+- **Misses hasOwnProperty bypass** (pp_pos_04) — no model for JSON.parse's own-property semantics.
+- **Misses bracket-notation PP** (pp_pos_05) — regex-based key extraction from user input not tracked through `match()`.
+- **Misses IPT for non-standard sinks** (ipt_pos_01, 03, 04) — only tracks `Array.prototype` for IPT; `hasOwnProperty`, `Function.prototype.call`, and `toString` are not in the sink list.
+- **Misses afa_pos_05** — unlike ODGen, Graph.js does not model the partial sanitiser bypass where `execSync` receives a string that has been partially filtered but remains injectable.
+- **Does not model destructuring** (pp_pos_08, ipt_pos_05) — this blind spot is universal across all tools.
+- Docker-only in practice — local setup requires Neo4j v5, which is complex to configure.
 
-**Verdict:** Best precision but very low recall. Suitable as a high-confidence secondary pass after a high-recall tool like eslint flags candidates. The flow-sensitive implementation planned in Iridium directly addresses ODGen's core weaknesses.
+**Verdict:** Best overall tool. The MDG representation catches gadget chains and multi-source patterns that ODGen and Semgrep miss entirely. The primary weakness is FPs from unmodelled sanitisers — exactly the problem a flow-sensitive analysis in Iridium would solve.
 
 ---
 
-### 4.3 Semgrep (p/javascript ruleset)
+### 4.3 ODGen (USENIX Security 2022)
 
 **Strengths:**
-- Zero false positives on PP and IPT — the built-in `p/javascript` ruleset simply has no PP rules, which means no PP-related FPs.
+- Highest precision (0.80) — only 1 false positive in 35 files.
+- Correctly identifies all three AFA negative cases as safe (requires taint flow from user-controlled inputs, not just variable paths).
+- Uniquely detects `afa_pos_05` (inter-procedural taint through an incomplete sanitiser) — the one case where ODGen's full dataflow analysis outperforms even Graph.js.
+- Correctly suppresses most false positives that trip up eslint (freeze, allowlists, null-proto, Map).
+
+**Weaknesses — confirmed blind spots:**
+1. **For-in loop PP (pp_pos_01, 03, 04, 06, 07):** ODGen's PP model requires `obj[key1][key2] = val` where both keys come directly from function parameters. For-in enumeration over a user-controlled object is not recognised as tainted.
+2. **Hoisting (pp_pos_07):** ODGen infers control flow from AST textual order. A `var` declaration below its use confuses the analysis — confirmed in the original paper appendix.
+3. **Destructuring (pp_pos_08, ipt_pos_05):** Destructuring assignment is not treated as a taint-propagating operation. Values extracted via destructuring are dropped.
+4. **Path traversal (afa_pos_01/02):** Despite the USENIX 2022 paper claiming path traversal detection, ODGen fails on the simplest `path.join + fs.readFile` pattern. The open-source release differs from the internal evaluation version.
+5. **Single false positive (pp_neg_08):** ODGen raises an alarm on the allowlist-guarded path-setter; the allowlist check is not modelled as a sanitiser.
+
+**Verdict:** Best precision but very low recall. Suitable as a high-confidence secondary pass after a high-recall tool flags candidates. The flow-sensitive implementation planned in Iridium directly addresses ODGen's core weaknesses.
+
+---
+
+### 4.4 Semgrep (p/javascript ruleset)
+
+**Strengths:**
+- Zero false positives on PP and IPT — the built-in `p/javascript` ruleset has no PP rules, so no PP-related FPs.
 - Correctly identifies `path.join`-based path traversal (afa_pos_01/02) and dynamic `require()` (afa_pos_03).
 - Fastest tool — 35 files in < 5 seconds.
 - Highly customisable: the `rules.yaml` in `tools/semgrep/` adds targeted rules for PP, AFA, and command injection that significantly improve recall.
 
 **Weaknesses:**
-- **Zero PP detection** out of the box — the `p/javascript` ruleset contains no prototype pollution rules (they exist in the Semgrep registry but are not bundled).
+- **Zero PP detection** out of the box — the `p/javascript` ruleset contains no prototype pollution rules.
 - **Intra-procedural only** — cannot follow taint through function calls. Misses the partial sanitiser bypass (afa_pos_05), the PP gadget chain (afa_pos_04), and all multi-function IPT patterns.
-- **3 false positives on AFA negatives** — `express-path-join-resolve-traversal` fires on any `path.join` with a variable argument, regardless of the `path.resolve + startsWith` or `fs.realpath` guards that follow.
+- **3 false positives on AFA negatives** — `express-path-join-resolve-traversal` fires on any `path.join` with a variable argument, regardless of `path.resolve + startsWith` or `fs.realpath` guards.
 
-**Verdict:** Weakest overall on this benchmark as configured. Adding the custom `rules.yaml` improves PP recall considerably (catches pp_pos_01, pp_pos_06 patterns). Still fundamentally limited by intra-procedural scope.
+**Custom rules.yaml improvement:** Running `bash tools/semgrep/run_custom.sh` with the custom PP + AFA + command-injection rules instead of `p/javascript` catches pp_pos_01, pp_pos_02, pp_pos_06 and afa_pos_05 (cmd-injection-template-literal-exec), raising overall recall to ~0.38.
+
+**Verdict:** Weakest overall as configured. Adding the custom `rules.yaml` closes much of the PP gap. Still fundamentally limited by intra-procedural scope for inter-function gadget chains.
 
 ---
 
 ## 5. Universal Blind Spots — Cases No Tool Caught
 
-These three cases were missed by **all three tools** and represent the hardest class of vulnerabilities:
+These cases were missed by **all four tools** and represent the hardest class of vulnerabilities:
 
 | File | Pattern | Why it's hard |
 |------|---------|---------------|
-| `pp_pos_08` | Destructuring `{ __proto__: x } = parsed` then `Object.assign(Object.prototype, x)` | No tool currently models destructuring as a taint-propagating operation |
-| `ipt_pos_05` | Same as above: destructuring feeds `Object.defineProperties` on prototype | Combination of destructuring + defineProperties is beyond all three tools |
-| `afa_pos_04` | PP gadget chain: `merge({}, payload)` → `Object.prototype.base = '/'` → `readUserFile(name, {})` reads arbitrary file | Requires cross-function taint from PP source through prototype chain to path construction |
+| `pp_pos_07` | `var` hoisting: variable used before declaration in source text | AST-order analysis breaks for hoisted vars; none of the four tools are flow-sensitive w.r.t. textual order |
+| `pp_pos_08` | Destructuring `{ __proto__: x } = parsed` then `Object.assign(Object.prototype, x)` | No tool models destructuring as a taint-propagating operation |
+| `ipt_pos_05` | Destructuring feeds `Object.defineProperties` on prototype | Combination of destructuring + defineProperties is beyond all four tools |
+| `pp_pos_04` | hasOwnProperty bypass via JSON.parse (parsed object lacks hasOwnProperty; for-in picks up `__proto__` key) | Requires modelling JSON.parse semantics + for-in key taint simultaneously |
 
 These are precisely the cases that motivate a **flow-sensitive, inter-procedural points-to analysis** in Iridium. An Andersen-style analysis alone is insufficient; the analysis needs:
 - A model for destructuring that propagates taint through binding patterns
 - Flow sensitivity to distinguish the state of an object before and after a polluting merge call
 - A gadget-chain query that links PP pollution to downstream property reads at sinks
+- A model for for-in key taint from user-controlled source objects
 
 ---
 
@@ -217,32 +250,67 @@ These are precisely the cases that motivate a **flow-sensitive, inter-procedural
 
 The results confirm the design decisions from the ODGen/explode-js analysis:
 
-1. **Basic Andersen analysis is insufficient.** ODGen uses an Andersen-style points-to analysis and still misses 17/21 positive cases. The for-in enumeration pattern (the most common real-world PP vector) requires tracking that a `for-in` key over a user-controlled object is itself tainted.
+1. **Basic Andersen analysis is insufficient.** ODGen uses an Andersen-style points-to analysis and still misses 17/21 positive cases. Graph.js's MDG (which adds flow edges) misses 11/21. The for-in enumeration pattern — the most common real-world PP vector — requires tracking that a `for-in` key over a user-controlled object is itself tainted.
 
-2. **Flow sensitivity is required.** The key differentiator between TP and FP in PP detection is whether the analysis knows *at the point of the assignment* whether the object has been guarded (frozen, null-proto'd, allowlisted). ODGen does not model this; eslint completely ignores it. Iridium's CFG-based analysis should propagate a "guarded" lattice bit alongside object points-to sets.
+2. **Flow sensitivity is required.** The key differentiator between TP and FP in PP detection is whether the analysis knows *at the point of the assignment* whether the object has been guarded (frozen, null-proto'd, allowlisted). Both ODGen and Graph.js FP on pp_neg_08 because they cannot model the allowlist early-exit. Iridium's CFG-based analysis should propagate a "guarded" lattice bit alongside object points-to sets.
 
-3. **Destructuring must be modelled.** Three cases (pp_pos_08, ipt_pos_05, and the Pattern B variant of pp_pos_08) are missed by all tools because destructuring assignment is not treated as a taint-propagating operation. In Iridium's IR, destructuring should lower to explicit property reads and bindings that carry taint.
+3. **Destructuring must be modelled.** Cases pp_pos_08, ipt_pos_05, and related variants are missed by all four tools because destructuring assignment is not treated as a taint-propagating operation. In Iridium's IR, destructuring should lower to explicit property reads and bindings that carry taint.
 
-4. **One CFG per function is a practical starting point.** The PP gadget chain (afa_pos_04) requires cross-function analysis, but the source and sink are in the same file and the call graph is trivial. A single-level inter-procedural analysis (inline the immediate callees) would be sufficient to detect it.
+4. **One CFG per function is a practical starting point.** The PP gadget chain (afa_pos_04) requires cross-function analysis, but the source and sink are in the same file with a trivial call graph. Graph.js detects it with its MDG; Iridium's single-level inter-procedural analysis (inline immediate callees) would be sufficient.
 
-5. **eslint as a fast pre-filter.** For the Iridium workflow, running eslint-plugin-security first to generate a candidate set, then running Iridium's precise analysis to confirm or suppress each alert, gives the best practical precision/recall trade-off.
+5. **Graph.js vs ODGen trade-off:** Graph.js has significantly higher recall (0.48 vs 0.19) at the cost of more FPs (5 vs 1). The FP pattern is consistent: unmodelled sanitisers at sinks. Iridium can target this gap — precise guard modelling would push Graph.js-level recall with ODGen-level precision.
+
+6. **eslint as a fast pre-filter.** For the Iridium workflow, running eslint-plugin-security first to generate a candidate set, then running Iridium's precise analysis to confirm or suppress each alert, gives the best practical precision/recall trade-off.
 
 ---
 
 ## 7. Reproducing the Evaluation
 
+### Setup
+
 ```bash
-# All three tools must be set up first
-bash tools/odgen/setup.sh
+# Tool 1: ESLint
 bash tools/eslint-plugin-security/setup.sh
+
+# Tool 2: Semgrep
 bash tools/semgrep/setup.sh
 
-# Run each tool
-bash tools/odgen/run_all.sh testcases/
-bash tools/eslint-plugin-security/run.sh testcases/
-bash tools/semgrep/run.sh testcases/
-bash tools/semgrep/run_custom.sh testcases/   # with custom PP + AFA rules
+# Tool 3: ODGen (git submodule)
+bash tools/odgen/setup.sh
+
+# Tool 4: Graph.js (Docker)
+cd tools/graphjs
+docker build . -t graphjs
+cd ../..
 ```
 
-Environment: Python 3.7+, Node.js 12+, npm, pip3.
-Docker/Neo4j not required for these three tools.
+### Run
+
+```bash
+# ESLint
+bash tools/eslint-plugin-security/run.sh testcases/
+
+# Semgrep — built-in p/javascript ruleset
+bash tools/semgrep/run.sh testcases/
+
+# Semgrep — custom PP + AFA + command-injection rules
+bash tools/semgrep/run_custom.sh testcases/
+
+# ODGen — one file at a time (see tools/odgen/run_all.sh for batch)
+bash tools/odgen/run_all.sh testcases/
+
+# Graph.js — Docker batch runner
+bash tools/run_graphjs.sh testcases/
+```
+
+### Environment requirements
+
+| Tool | Requirements |
+|------|-------------|
+| eslint-plugin-security | Node.js 12+, npm |
+| Semgrep | Python 3.7+, pip3 |
+| ODGen | Node.js 12+, npm |
+| Graph.js | Docker |
+
+Graph.js output for each file is in `/tmp/graphjs_iridium_results/<mangled_filename>/taint_summary_detection.json`.
+An empty JSON array (`[]`) means no vulnerabilities detected; a non-empty array contains objects with `vuln_type`, `sink`, and `sink_lineno` fields.

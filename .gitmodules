@@ -1,3 +1,6 @@
 [submodule "artifacts/ODGen"]
 	path = artifacts/ODGen
 	url = https://github.com/Song-Li/ODGen
+[submodule "tools/graphjs"]
+	path = tools/graphjs
+	url = https://github.com/formalsec/graphjs
