@@ -1,0 +1,23 @@
+{
+  "name": "iridium_security",
+  "version": "1.0.0",
+  "description": "Static-analysis testbench for JavaScript vulnerability detection, developed alongside the Iridium compiler framework. The test cases guide precision/ efficiency trade-offs in points-to and taint analysis.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "eslint": "^9.39.4",
+    "eslint-plugin-security": "^4.0.0"
+  },
+  "dependencies": {
+    "@babel/cli": "^7.28.6",
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.0",
+    "@babel/preset-typescript": "^7.28.5",
+    "mocha": "^11.7.5"
+  }
+}

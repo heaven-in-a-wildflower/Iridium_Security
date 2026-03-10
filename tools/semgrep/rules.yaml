@@ -1,0 +1,106 @@
+rules:
+
+  # ── Prototype Pollution ──────────────────────────────────────────────────────
+
+  - id: proto-pollution-for-in-loop
+    message: >
+      Prototype pollution: for-in loop copies all keys from a user-controlled
+      object including __proto__. An attacker can inject {"__proto__": {...}}
+      to pollute Object.prototype.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe: "CWE-1321"
+      confidence: HIGH
+    patterns:
+      - pattern: |
+          for ($KEY in $SOURCE) {
+            $TARGET[$KEY] = $SOURCE[$KEY];
+          }
+
+  - id: proto-pollution-dynamic-path-split
+    message: >
+      Prototype pollution: a user-controlled string is split on '.' and each
+      segment is used as a property key without filtering __proto__ or
+      constructor.prototype.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe: "CWE-1321"
+      confidence: MEDIUM
+    patterns:
+      - pattern: |
+          $KEYS = $PATH.split('.');
+          ...
+          $OBJ[$KEYS[...]] = $VALUE;
+
+  - id: proto-pollution-direct-proto-write
+    message: >
+      Prototype pollution: direct write to obj.__proto__ propagates to
+      Object.prototype and affects all objects.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe: "CWE-1321"
+      confidence: HIGH
+    pattern: $OBJ.__proto__[$KEY] = $VALUE
+
+  - id: proto-pollution-object-assign-proto
+    message: >
+      Prototype pollution: Object.assign called with Object.prototype or
+      __proto__ as the target.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe: "CWE-1321"
+      confidence: HIGH
+    patterns:
+      - pattern: Object.assign(Object.prototype, $SRC)
+      - pattern: Object.assign($OBJ.__proto__, $SRC)
+
+  # ── Arbitrary File Access ────────────────────────────────────────────────────
+
+  - id: path-traversal-readfile-variable
+    message: >
+      Path traversal: fs.readFile/readFileSync called with a variable path
+      that is not validated. An attacker can supply '../' sequences to escape
+      the intended directory.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe: "CWE-22"
+      confidence: MEDIUM
+    patterns:
+      - pattern: $FS.readFile($PATH, ...)
+      - pattern-not: $FS.readFile("...", ...)
+      - pattern-not: $FS.readFile(`...`, ...)
+
+  - id: path-traversal-writefile-variable
+    message: >
+      Path traversal: fs.writeFile/writeFileSync called with a variable path.
+      An attacker can overwrite arbitrary files.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe: "CWE-22"
+      confidence: MEDIUM
+    patterns:
+      - pattern: $FS.writeFileSync($PATH, ...)
+      - pattern-not: $FS.writeFileSync("...", ...)
+
+  # ── Command Injection ────────────────────────────────────────────────────────
+
+  - id: cmd-injection-template-literal-exec
+    message: >
+      Command injection: execSync/exec/spawn called with a template literal
+      containing interpolated variables. An attacker who controls any variable
+      in the template can inject arbitrary shell commands.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe: "CWE-78"
+      confidence: HIGH
+    patterns:
+      - pattern: execSync(`...$...`, ...)
+      - pattern: exec(`...$...`, ...)
+      - pattern: spawn(`...$...`, ...)
