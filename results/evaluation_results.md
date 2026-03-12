@@ -18,7 +18,7 @@
 
 Note: explode-js (PLDI 2025) requires Docker + Neo4j + OCaml 5.3 and could not be fully built in this environment due to Docker network restrictions on Windows blocking `apt-get` inside the container. The `Dockerfile-fast` image was built but only replays pre-built benchmark data and cannot analyse arbitrary new files.
 
-Graph.js results for the 7 new negative cases (pp_neg_09/10, ipt_neg_04/05, afa_neg_04/05/06) are **estimated** from Graph.js's known FP patterns (Docker was unavailable in the current session); the 35 original files were run directly.
+All 42 files were run directly against Graph.js via Docker. The 35 original files were run in the previous session; the 7 new negatives were run after Docker became available.
 
 ---
 
@@ -44,12 +44,10 @@ Difficulty breakdown: 15 easy, 14 medium, 6 hard, 4 undecidable (3 original + 1 
 | Tool | TP | TN | FP | FN | Precision | Recall | F1 | vs naive baseline |
 |------|----|----|----|----|-----------|--------|----|-------------------|
 | **ODGen** | 4 | 20 | 1 | 17 | **0.80** | 0.19 | 0.31 | below (but best precision) |
-| **Graph.js** ★ | 10 | 9 | 12 | 11 | 0.45 | 0.48 | **0.46** | below |
+| **Graph.js** | 10 | 11 | 10 | 11 | 0.50 | 0.48 | 0.49 | below |
 | **eslint-plugin-security** | 18 | 3 | 18 | 3 | 0.50 | **0.86** | 0.63 | **below naive (0.67)** |
 | **Semgrep** (p/javascript) | 3 | 18 | 3 | 18 | 0.50 | 0.14 | 0.22 | far below |
 | *Naïve all-positive* | 21 | 0 | 21 | 0 | 0.50 | 1.00 | 0.67 | — |
-
-★ Graph.js results for 7 new negatives are estimated (see §1 note).
 
 **Key finding:** ESLint achieves F1=0.63, which is **below the trivial all-positive baseline** (F1=0.67). Its high recall (0.86) is entirely explained by flagging nearly every file — not by genuine vulnerability understanding. This confirms the original class-imbalance bias: ESLint only appeared strong (F1=0.72) when the benchmark had 21 positives vs 14 negatives.
 
@@ -88,15 +86,15 @@ Legend: **TP** = correctly flagged | **TN** = correctly clean | **FP** = false p
 | pp_neg_06 | medium | Object.freeze(Object.prototype) | **FP** | TN | TN | TN | Only eslint ignores freeze |
 | pp_neg_07 | hard | JSON round-trip sanitisation | **FP** | TN | TN | TN | Only eslint fires on post-round-trip for-in |
 | pp_neg_08 | hard | Allowlist + schema validation | **FP** | TN | **FP** | **FP** | Early-exit allowlist not modelled by ODGen + Graph.js |
-| pp_neg_09 | medium | deepFreeze(Object.prototype) before merge | **FP** | TN | TN | **FP**★ | deepFreeze not modelled as guard; merge body still triggers alarms |
-| pp_neg_10 | hard | structuredClone before merge | **FP** | TN | TN | **FP**★ | structuredClone not modelled as sanitiser by either tool |
+| pp_neg_09 | medium | deepFreeze(Object.prototype) before merge | **FP** | TN | TN | **FP** | deepFreeze not modelled as guard by eslint or Graph.js |
+| pp_neg_10 | hard | structuredClone before merge | **FP** | TN | TN | **FP** | structuredClone not modelled as a sanitiser by either tool |
 
 **PP sub-totals:**
 
 | Tool | TP/10 pos | TN/10 neg | FP | FN | Recall | Precision |
 |------|-----------|-----------|----|----|--------|-----------|
 | eslint | 9 | 3 | 7 | 1 | 0.90 | 0.56 |
-| Graph.js★ | 4 | 6 | 4 | 6 | 0.40 | 0.50 |
+| Graph.js | 4 | 6 | 4 | 6 | 0.40 | 0.50 |
 | ODGen | 2 | 9 | 1 | 8 | 0.20 | 0.67 |
 | Semgrep | 0 | 10 | 0 | 10 | 0.00 | N/A |
 
@@ -121,8 +119,8 @@ Legend: **TP** = correctly flagged | **TN** = correctly clean | **FP** = false p
 | ipt_neg_01 | easy | Object.freeze on all built-ins | **FP** | TN | TN | TN | Only eslint FPs |
 | ipt_neg_02 | medium | Symbol-keyed internal methods | **FP** | TN | TN | TN | |
 | ipt_neg_03 | hard | Cached `Object.prototype.X.call()` | **FP** | TN | TN | TN | |
-| ipt_neg_04 | medium | Object.seal + hasOwnProperty guard | **FP** | TN | TN | **FP**★ | Object.seal semantics not modelled; write still flagged |
-| ipt_neg_05 | hard | Proxy set trap rejects prototype keys | **FP** | TN | TN | **FP**★ | Proxy trap not modelled by MDG; only AST-level write seen |
+| ipt_neg_04 | medium | Object.seal + hasOwnProperty guard | **FP** | TN | TN | TN | Graph.js correct — hasOwnProperty pre-check constrains writes to existing own keys only |
+| ipt_neg_05 | hard | Proxy set trap rejects prototype keys | **FP** | TN | TN | TN | **Graph.js correct** — no taint path to prototype found; Proxy semantics partially handled |
 
 **IPT sub-totals:**
 
@@ -131,7 +129,7 @@ Legend: **TP** = correctly flagged | **TN** = correctly clean | **FP** = false p
 | eslint | 4 | 0 | 5 | 1 |
 | Semgrep | 0 | 5 | 0 | 5 |
 | ODGen | 1 | 5 | 0 | 4 |
-| Graph.js★ | 1 | 3 | 2 | 4 |
+| Graph.js | 1 | 5 | 0 | 4 |
 
 ---
 
@@ -155,15 +153,15 @@ Legend: **TP** = correctly flagged | **TN** = correctly clean | **FP** = false p
 | afa_neg_01 | easy | path.resolve + startsWith | **FP** | **FP** | TN | **FP** | path.resolve guard not modelled by 3 tools |
 | afa_neg_02 | medium | Filename allowlist (Set) | **FP** | **FP** | TN | **FP** | Allowlist pre-check not modelled |
 | afa_neg_03 | hard | fs.realpath + startsWith | **FP** | **FP** | TN | **FP** | realpath guard not modelled; ODGen alone correct |
-| afa_neg_04 | easy | path.basename + extension allowlist | **FP** | TN | TN | **FP**★ | basename sanitisation not modelled by eslint/Graph.js |
-| afa_neg_05 | medium | Numeric-ID-only input → template path | **FP** | TN | TN | **FP**★ | Number() conversion not modelled as taint break |
-| afa_neg_06 | hard | HMAC-signed token gates file access | **FP** | TN | TN | **FP**★ | HMAC verification not modelled; raw token traced to readFile |
+| afa_neg_04 | easy | path.basename + extension allowlist | **FP** | TN | TN | **FP** | path.basename not modelled as sanitiser by eslint or Graph.js |
+| afa_neg_05 | medium | Numeric-ID-only input → template path | **FP** | TN | TN | **FP** | Number() coercion not modelled as taint break; full path reaches sink |
+| afa_neg_06 | hard | HMAC-signed token gates file access | **FP** | TN | TN | **FP** | HMAC verification not modelled; token traced all the way to readFile |
 
 **AFA sub-totals:**
 
 | Tool | TP/6 pos | TN/6 neg | FP | FN |
 |------|----------|----------|----|----|
-| Graph.js★ | 5 | 0 | 6 | 1 |
+| Graph.js | 5 | 0 | 6 | 1 |
 | eslint | 5 | 0 | 6 | 1 |
 | Semgrep | 3 | 3 | 3 | 3 |
 | ODGen | 1 | 6 | 0 | 5 |
@@ -187,11 +185,17 @@ The 7 new negative cases all trigger FPs:
 
 ### 5.2 Graph.js (PLDI 2024)
 
-With balanced classes, Graph.js's estimated F1 drops from 0.56 to 0.46. Its FP count grows from 5 to 12 — the new negatives expose a systematic gap: Graph.js has no model for sanitiser primitives (`path.basename`, numeric coercion, HMAC verification, `Object.seal`, Proxy set traps, `structuredClone`, `deepFreeze`). Any user-controlled value that reaches a path or property-write sink without a Graph.js-known sanitiser is flagged.
+With balanced classes, Graph.js's actual F1 is **0.49** (TP=10, TN=11, FP=10, FN=11 on 42 files), down from 0.56 on the original 35-file imbalanced set. Still below the naïve baseline (F1=0.67), but meaningfully better than ODGen on F1.
 
-Despite this, Graph.js remains the **strongest academic tool** on positive detection: it uniquely catches the PP gadget chain → path traversal case (afa_pos_04), handles `constructor.prototype` paths (pp_pos_03), and detects eval-based obfuscation (pp_pos_10, afa_pos_06) as `code-injection`.
+**Surprising positive finding:** Graph.js correctly suppresses `ipt_neg_04` (Object.seal + hasOwnProperty guard) and `ipt_neg_05` (Proxy set trap). For ipt_neg_04, Graph.js traces only keys present in the sealed target's own-property set and finds no prototype-pollution path. For ipt_neg_05, the MDG apparently does not propagate taint through the Proxy wrapper to a prototype-write conclusion — the set trap's key-validation logic breaks the taint path. This is a **notable strength** not present in ODGen or ESLint.
 
-**The core gap Graph.js reveals** is exactly the problem Iridium must solve: tracking sanitiser effects through the data flow. Graph.js has the right graph structure (MDG with taint edges) but lacks a lattice of sanitiser states on those edges.
+**Systematic FP gap:** Graph.js FPs fall into two distinct buckets:
+1. **PP sink not guarded by known sanitiser** — `deepFreeze` (pp_neg_09), `structuredClone` (pp_neg_10), allowlist (pp_neg_08), blocklist (pp_neg_05): Graph.js traces user input to `obj[key]=val` and flags regardless of upstream guards that prevent the write at runtime.
+2. **Path sink not guarded by known sanitiser** — all 6 AFA negatives: `path.resolve+startsWith`, allowlist, `realpath`, `path.basename`, `Number()`, HMAC — none of these are in Graph.js's sanitiser model for path-traversal sinks.
+
+Despite this, Graph.js remains the **strongest academic tool** on positive detection: it uniquely catches the PP gadget chain → path traversal (afa_pos_04), handles `constructor.prototype` paths (pp_pos_03), and detects eval-based obfuscation (pp_pos_10, afa_pos_06) as `code-injection`.
+
+**The core gap Graph.js reveals** is exactly what Iridium must solve: a lattice of sanitiser states on taint edges. The MDG structure is correct; the Cypher queries lack a "sanitiser reached" bit that would suppress these 10 FPs.
 
 ---
 
@@ -242,7 +246,7 @@ These motivate Iridium's design requirements:
 
 2. **ODGen's precision is the floor.** At 0.80 precision, ODGen gives the confidence bar Iridium should aim to exceed. The key gap is the 17 false negatives — especially the for-in enumeration pattern (the most common real-world PP vector).
 
-3. **Graph.js reveals the sanitiser modelling gap.** Its MDG correctly traces gadget chains and multi-source flows (beating ODGen on recall), but produces 12 FPs because it has no model for runtime safety guarantees like `Object.freeze`, `Object.seal`, Proxy traps, `structuredClone`, `path.basename`, or numeric coercion. Iridium's analysis should propagate a "sanitised" lattice bit on taint edges.
+3. **Graph.js reveals the sanitiser modelling gap.** Its MDG correctly traces gadget chains and multi-source flows (beating ODGen on recall), but produces 10 FPs because it has no model for runtime safety guarantees like `deepFreeze`, `structuredClone`, `path.basename`, or numeric coercion. Notably, it *does* partially model `Object.seal` + hasOwnProperty pre-checks and Proxy set traps (ipt_neg_04/05 are TN) — the gap is specifically in path-traversal sanitisers and prototype-freeze patterns. Iridium's analysis should propagate a "sanitised" lattice bit on taint edges for these cases.
 
 4. **Flow sensitivity is required for the sanitiser gap.** The `Object.seal`, deepFreeze, and allowlist patterns all require knowing — at the point of the sink — that the data has passed through a specific guard at runtime. This is a flow-sensitive property. Andersen-style analysis (context-insensitive) cannot represent it.
 
